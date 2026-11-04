@@ -27,7 +27,7 @@ export function validateAccountState(input){
 
 export function importProfile(state,profile,sourceId){
   require(validId(sourceId));
-  const next=validateAccountState(state);
+  const next=state===null?{version:1,profiles:[]}:validateAccountState(state);
   if(next.profiles.some(p=>p.sourceProfileId===sourceId))return next;
   const incoming=validateAccountState({version:1,profiles:[profile]}).profiles[0];
   incoming.id=crypto.randomUUID();

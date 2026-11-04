@@ -45,6 +45,13 @@ test('import adds a separate kitchen without changing local records and is idemp
   assert.deepEqual(again,result);
 });
 
+test('the first import creates one kitchen rather than retaining a placeholder kitchen',()=>{
+  const result=importProfile(null,freshProfile('local','KM'),'local');
+  assert.equal(result.profiles.length,1);
+  assert.equal(result.profiles[0].name,'KM');
+  assert.equal(result.profiles[0].sourceProfileId,'local');
+});
+
 test('export parsing accepts current profile exports and rejects foreign or corrupt files', () => {
   const profile=freshProfile('old','나');
   assert.equal(readProfileExport(JSON.stringify({format:'fridge-grocery-profile',version:1,profile})).id,'old');

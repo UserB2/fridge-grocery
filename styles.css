@@ -451,6 +451,11 @@ p.item-meta { margin-bottom: 0; }
 }
 
 /* Shopping filters share the existing category chips and search field. */
+.account-status { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; color:var(--muted); font-size:12px; margin-bottom:20px; overflow-wrap:anywhere; }
+.sync-recovery p { margin-top:0; }
+.sync-recovery .btn { white-space:normal; text-align:left; }
+.dialog-body > .btn + h3 { margin-top:24px; }
+input[type="file"] { max-width:100%; }
 .shopping-filters { margin-bottom: 20px; }
 .shopping-filters .toolbar { margin: 0 0 16px; gap: 12px; }
 .shopping-filters .search-field { flex: 1; max-width: 520px; }
