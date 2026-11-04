@@ -9,6 +9,24 @@ export function findIngredient(name) {
   return ingredients.find(ingredient => [ingredient.name, ...ingredient.aliases].some(alias => normalizeName(alias) === normalized)) || null;
 }
 
+export function filterShopping(items, { search = '', category = '전체', status = '전체' } = {}, recipeCatalog = []) {
+  const query = normalizeName(search);
+  const recipeNames = new Map(recipeCatalog.map(recipe => [recipe.id, recipe.name]));
+  return items.filter(item => {
+    if (category !== '전체' && item.category !== category) return false;
+    if (status === '구매 완료' && item.checked !== true) return false;
+    if (status === '미구매' && item.checked === true) return false;
+    if (!query) return true;
+    const canonical = ingredients.find(ingredient => ingredient.id === item.ingredientId) || findIngredient(item.name);
+    const names = [
+      item.name,
+      ...(canonical ? [canonical.name, ...canonical.aliases] : []),
+      ...(item.recipeIds || []).map(id => recipeNames.get(id)),
+    ];
+    return names.some(name => normalizeName(name).includes(query));
+  });
+}
+
 export function makeItem(input = {}) {
   const canonical = ingredients.find(ingredient => ingredient.id === input.ingredientId) || findIngredient(input.name);
   return {

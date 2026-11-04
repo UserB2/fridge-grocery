@@ -449,3 +449,22 @@ p.item-meta { margin-bottom: 0; }
   .form-grid.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .form-grid.compact .field input, .form-grid.compact .field select { padding: 10px; }
 }
+
+/* Shopping filters share the existing category chips and search field. */
+.shopping-filters { margin-bottom: 20px; }
+.shopping-filters .toolbar { margin: 0 0 16px; gap: 12px; }
+.shopping-filters .search-field { flex: 1; max-width: 520px; }
+.shopping-filter-row { display: flex; align-items: flex-start; gap: 12px; margin-top: 12px; }
+.shopping-filter-label { flex: 0 0 62px; padding-top: 10px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.shopping-filter-row .chip-list { flex: 1; margin: 0; }
+.shopping-filter-row .chip span { margin-left: 4px; opacity: .7; font-size: 10px; }
+.shopping-result { margin: 16px 0 0; }
+.shopping-result strong { color: var(--sage); }
+.shopping-hidden-note { background: #fff4e7; color: #8a623b; border-color: #ead7bd; }
+@media (max-width: 700px) {
+  .shopping-filters .toolbar { align-items: stretch; }
+  .shopping-filters .search-field { width: 100%; flex-basis: 100%; }
+  .shopping-filters .toolbar > .btn { align-self: flex-end; margin-left: auto; }
+  .shopping-filter-row { flex-direction: column; gap: 7px; }
+  .shopping-filter-label { flex-basis: auto; padding-top: 0; }
+}
