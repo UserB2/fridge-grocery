@@ -9,7 +9,7 @@ function service(){
   const rows=new Map();
   let readGate=null,loseResponse=false,offline=false;
   return {rows,setReadGate(value){readGate=value;},loseNextResponse(){loseResponse=true;},setOffline(value){offline=value;},client(userId){return {
-    from(table){assert.equal(table,'fridge_accounts');return {select(){return this;},eq(key,value){assert.equal(key,'user_id');assert.equal(value,userId);return this;},async maybeSingle(){if(readGate)await readGate.promise;if(offline)throw new Error('network');return {data:structuredClone(rows.get(userId)??null),error:null};}};},
+    from(table){assert.equal(table,'fridge_accounts');return {select(){return this;},eq(key,value){assert.equal(key,'user_id');assert.equal(value,userId);return this;},async maybeSingle(){const captured=structuredClone(rows.get(userId)??null);if(readGate)await readGate.promise;if(offline)throw new Error('network');return {data:captured,error:null};}};},
     async rpc(name,args){assert.equal(name,'save_fridge_state');if(offline)throw new Error('network');const row=rows.get(userId);
       if(row?.mutation_id===args.p_mutation_id)return {data:structuredClone(row),error:null};
       if((row?.revision??0)!==args.p_expected_revision)return {data:null,error:{code:'P0001',message:'VERSION_CONFLICT'}};
@@ -78,4 +78,27 @@ test('cached documents are account-specific and do not turn an offline session i
   const b=createCloudStore(backend.client('bob'),{storage});await assert.rejects(()=>b.connect({id:'bob'}));assert.equal(b.snapshot(),null);
   const again=createCloudStore(backend.client('alice'),{storage});const cached=await again.connect({id:'alice'});
   assert.equal(cached.state.profiles[0].name,'alice only');await assert.rejects(()=>again.save(state('offline edit')));
+});
+
+test('deferred token selection cannot write the previous account payload into the new account',async()=>{
+  const gate=deferred();let identity='alice';let bob=state('Bob private');
+  const client={from(){return {select(){return this;},eq(){return this;},async maybeSingle(){return {data:null,error:null};}};},async rpc(_name,args){
+    await gate.promise;
+    if(args.p_expected_user_id&&args.p_expected_user_id!==identity)return {data:null,error:{code:'42501',message:'SESSION_CHANGED'}};
+    bob=structuredClone(args.p_state);
+    return {data:{user_id:identity,state:bob,revision:1,mutation_id:args.p_mutation_id},error:null};
+  }};
+  const store=createCloudStore(client);await store.connect({id:'alice'});
+  const pending=store.save(state('Alice private'));store.disconnect();identity='bob';gate.resolve();
+  await assert.rejects(()=>pending,error=>error.code==='SESSION_CHANGED');
+  assert.equal(bob.profiles[0].name,'Bob private');
+});
+
+test('a read started before a save cannot roll back a newer accepted revision',async()=>{
+  const backend=service();const store=createCloudStore(backend.client('alice'));
+  await store.connect({id:'alice'});await store.save(state('old'));
+  const gate=deferred();backend.setReadGate(gate);const pending=store.read();
+  await store.save(state('saved'));gate.resolve();await pending;
+  assert.equal(store.snapshot().revision,2);
+  assert.equal(store.snapshot().state.profiles[0].name,'saved');
 });

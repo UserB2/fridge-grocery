@@ -63,3 +63,19 @@ test('account caches never share the existing local key or another account key',
   assert.notEqual(accountCacheKey('alice'),'fridge-grocery:v1:state');
   assert.throws(()=>accountCacheKey(''));
 });
+
+test('hostile IDs and expiry markup are rejected before account imports can reach HTML templates',()=>{
+  for(const value of [{id:'x" onclick="alert(1)',expiry:''},{id:'safe',expiry:'<img src=x onerror=alert(2)>-01-01'},{id:'safe',expiry:'2026-02-30'}]){
+    const profile=freshProfile('local','KM');profile.fridge=[makeItem({name:'우유',...value})];
+    assert.throws(()=>readProfileExport(JSON.stringify({format:'fridge-grocery-profile',version:1,profile})));
+  }
+});
+
+test('large pretty-printed exports round trip when the compact document is within its limit',()=>{
+  const profile=freshProfile('stock','많은 재료');
+  profile.fridge=Array.from({length:700},(_,i)=>makeItem({id:`row-${i}`,name:'우유'}));
+  validateAccountState({version:1,profiles:[profile]});
+  const exported=JSON.stringify({format:'fridge-grocery-profile',version:1,profile},null,2);
+  assert.ok(new TextEncoder().encode(exported).length>200000);
+  assert.equal(readProfileExport(exported).fridge.length,700);
+});

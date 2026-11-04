@@ -22,6 +22,7 @@ export function createCloudStore(client,{storage,onChange=()=>{},onStatus=()=>{}
     check(token);if(result.error)throw result.error;return parse(result.data);
   }
   function accept(snapshot){
+    if(current&&snapshot.revision<current.revision)return structuredClone(current);
     current=structuredClone(snapshot);blocked=false;
     try{storage?.setItem(accountCacheKey(user.id),JSON.stringify({user_id:user.id,...snapshot}));}catch{}
     status('synced');onChange(structuredClone(current));return structuredClone(current);
@@ -52,10 +53,10 @@ export function createCloudStore(client,{storage,onChange=()=>{},onStatus=()=>{}
       if(!user)throw failure('SIGNED_OUT','먼저 로그인해 주세요.');
       if(busy)throw failure('BUSY','저장 중이에요. 잠시 기다려 주세요.');
       if(blocked)throw failure('RELOAD_REQUIRED','연결을 확인하고 최신 기록을 불러온 뒤 다시 저장해 주세요.');
-      const state=validateAccountState(input),token=epoch,mutationId=crypto.randomUUID(),revision=expectedRevision;
+      const state=validateAccountState(input),token=epoch,ownerId=user.id,mutationId=crypto.randomUUID(),revision=expectedRevision;
       busy=true;status('saving');
       try{
-        const result=await client.rpc('save_fridge_state',{p_state:state,p_expected_revision:revision,p_mutation_id:mutationId});
+        const result=await client.rpc('save_fridge_state',{p_state:state,p_expected_revision:revision,p_mutation_id:mutationId,p_expected_user_id:ownerId});
         check(token);
         if(result.error){
           if(result.error.message?.includes('VERSION_CONFLICT'))throw failure('CONFLICT','다른 기기에서 목록이 바뀌었어요. 입력을 보관하고 최신 기록을 불러와 주세요.');

@@ -14,7 +14,8 @@ drop policy if exists own_fridge_read on public.fridge_accounts;
 create policy own_fridge_read on public.fridge_accounts for select to authenticated
   using ((select auth.uid()) = user_id);
 
-create or replace function public.save_fridge_state(p_state jsonb,p_expected_revision bigint,p_mutation_id uuid)
+drop function if exists public.save_fridge_state(jsonb,bigint,uuid);
+create or replace function public.save_fridge_state(p_state jsonb,p_expected_revision bigint,p_mutation_id uuid,p_expected_user_id uuid)
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
   account_id uuid := auth.uid();
@@ -25,6 +26,7 @@ declare
   collection text;
 begin
   if account_id is null then raise exception 'NOT_AUTHENTICATED' using errcode='42501'; end if;
+  if p_expected_user_id is null or account_id<>p_expected_user_id then raise exception 'SESSION_CHANGED' using errcode='42501'; end if;
   if p_mutation_id is null or p_expected_revision is null or p_expected_revision<0 then raise exception 'INVALID_REQUEST'; end if;
   if p_state is null or jsonb_typeof(p_state)<>'object' or p_state->>'version' is distinct from '1'
     or jsonb_typeof(p_state->'profiles') is distinct from 'array' then raise exception 'INVALID_STATE'; end if;
@@ -59,8 +61,8 @@ begin
   return to_jsonb(saved);
 end;
 $$;
-revoke all on function public.save_fridge_state(jsonb,bigint,uuid) from public,anon;
-grant execute on function public.save_fridge_state(jsonb,bigint,uuid) to authenticated;
+revoke all on function public.save_fridge_state(jsonb,bigint,uuid,uuid) from public,anon;
+grant execute on function public.save_fridge_state(jsonb,bigint,uuid,uuid) to authenticated;
 
 do $$ begin
   if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='fridge_accounts') then

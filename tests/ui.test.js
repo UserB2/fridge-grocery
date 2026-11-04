@@ -6,10 +6,10 @@ import {freshProfile,makeItem} from '../core.js';
 
 const tick=async()=>{for(let i=0;i<10;i++)await new Promise(resolve=>setImmediate(resolve));};
 async function waitFor(check){for(let i=0;i<40;i++){if(check())return;await new Promise(resolve=>setTimeout(resolve,5));}assert.ok(check(),'expected UI state did not appear');}
-async function page(){
+async function page(localProfile=freshProfile('local','기존 주방')){
   const window=new Window({url:'https://example.com/fridge/'});
   window.document.write(await readFile(new URL('../index.html',import.meta.url),'utf8'));
-  const local={version:1,activeProfileId:'local',profiles:[freshProfile('local','기존 주방')]};
+  const local={version:1,activeProfileId:localProfile.id,profiles:[localProfile]};
   window.localStorage.setItem('fridge-grocery:v1:state',JSON.stringify(local));
   const prior={};for(const key of ['window','document','location','FormData']){prior[key]=globalThis[key];globalThis[key]=window[key];}
   const app=await import(`../app.js?test=${crypto.randomUUID()}`);await tick();
@@ -77,5 +77,15 @@ test('remote change while editing keeps the form draft and rejects stale save',a
     assert.equal(p.document.querySelector('#modal').open,true);
     assert.equal(form.elements.name.value,'작성 중인 이름');
     assert.equal(b.row().state.profiles[0].shopping[0].name,'우유');
+  }finally{await p.close();}
+});
+
+test('legacy local ID and expiry values render as text without injecting event handlers',async()=>{
+  const local=freshProfile('local','기존 주방');
+  local.fridge.push(makeItem({id:'x" onclick="alert(1)',name:'우유',expiry:'<img src=x onerror=alert(2)>-01-01'}));
+  const p=await page(local);try{
+    p.document.querySelector('[data-action="navigate"][data-view="fridge"]').click();
+    assert.equal(p.document.querySelectorAll('#main-content [onclick],#main-content [onerror],#main-content img').length,0);
+    assert.match(p.document.querySelector('#main-content').textContent,/<img src=x/);
   }finally{await p.close();}
 });
