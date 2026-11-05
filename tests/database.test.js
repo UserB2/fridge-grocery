@@ -3,6 +3,26 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
 
+test('signup hook isolates unverified password accounts from Google addresses',async()=>{
+  const db=new PGlite();
+  try{
+    await db.exec('create role anon; create role authenticated; create role supabase_auth_admin;');
+    await db.exec(await readFile(new URL('../supabase/email-signup-hook.sql',import.meta.url),'utf8'));
+    const check=async(provider,email)=>{
+      const event={user:{email,app_metadata:{provider}}};
+      return (await db.query('select public.check_fridge_signup($1::jsonb) as result',[JSON.stringify(event)])).rows[0].result;
+    };
+    await db.exec('set role supabase_auth_admin;');
+    const alias='a'.repeat(64)+'@password.fridge.invalid';
+    assert.deepEqual(await check('google','alice@example.com'),{});
+    assert.deepEqual(await check('email',alias),{});
+    assert.equal((await check('email','alice@example.com')).error.http_code,403);
+    assert.equal((await check('google',alias)).error.http_code,403);
+    await db.exec('reset role; set role authenticated;');
+    await assert.rejects(()=>check('email',alias),/permission denied/);
+  }finally{await db.close();}
+});
+
 test('database enforces ownership, atomic versions and replay safety for real SQL roles',async()=>{
   const db=new PGlite();
   try{

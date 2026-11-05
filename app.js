@@ -28,6 +28,7 @@ let timer;
 let modalContext=null;
 let accountClient=null,cloudStore=null,accountUser=null,accountPhase='local',accountRevision=0;
 let writeBusy=false,accountEpoch=0,accountCleanup=()=>{},pendingRemote=false;
+let authBusy=false;
 const dirtyPrices=new Map();
 const editing=()=>$('#modal').open||dirtyPrices.size>0||writeBusy;
 const shoppingCurrency=()=>profile().shoppingCurrency||'USD';
@@ -50,7 +51,7 @@ async function commit(next,message,refresh=true){
 }
 function commitProfile(next,message,refresh=true){return commit({...state,profiles:state.profiles.map(p=>p.id===next.id?next:p)},message,refresh);}
 function updateProfile(change,message,refresh=true){const next=structuredClone(profile());change(next);return commitProfile(next,message,refresh);}
-function closeModal(){$('#modal').close();modalContext=null;}
+function closeModal(){$('#email-auth-form')?.reset();$('#modal').close();modalContext=null;}
 function openModal(content,context){modalContext=context;const m=$('#modal');m.innerHTML=content;m.showModal();}
 function dialog(title,body,actions='',form=''){return `${form?`<form id="${form}">`:''}<div class="dialog-header"><h2 class="dialog-title" id="dialog-title">${title}</h2><button type="button" class="btn ghost icon" data-action="close" aria-label="닫기">${icon('close')}</button></div><div class="dialog-body">${body}</div>${actions?`<div class="dialog-actions">${actions}</div>`:''}${form?'</form>':''}`;}
 function field(label,name,value='',type='text',options=''){return `<label class="field"><span class="field-label">${label}</span><input name="${esc(name)}" type="${type}" value="${esc(value)}" ${options}></label>`;}
@@ -99,9 +100,85 @@ function showPurchase(id){const p=profile().purchases.find(p=>p.id===id);if(!p)r
 function formItems(form,items){const fd=new FormData(form);return items.map(i=>{const out={...i,price:parseMoney(fd.get(`price_${i.id}`))};if(!i.transferred){out.quantity=String(fd.get(`quantity_${i.id}`)||'');out.unit=String(fd.get(`unit_${i.id}`)||'').trim();out.category=String(fd.get(`category_${i.id}`)||i.category);out.location=String(fd.get(`location_${i.id}`)||'냉장');out.expiry=String(fd.get(`expiry_${i.id}`)||'');}return out;});}
 function updateLiveSummary(){const form=$('#checkout-form')||$('#purchase-form');if(!form)return;try{const fd=new FormData(form);const p={items:formItems(form,modalContext.items),total:parseMoney(fd.get('total')),currency:fd.get('currency')};const s=purchaseSummary(p);$('#live-summary').innerHTML=`가격 입력 ${s.priced}/${s.count}개 · <strong>입력된 품목 합계 ${money(s.subtotal,p.currency)}</strong>${p.total!=null?`<br>실제 결제 총액 ${money(p.total,p.currency)} · 차이 ${money(s.difference,p.currency)}`:''}`;}catch{ $('#live-summary').textContent='금액은 0 이상의 숫자로 소수 둘째 자리까지 입력해 주세요.';}}
 function exportCurrentProfile(){const payload={format:'fridge-grocery-profile',version:1,exportedAt:new Date().toISOString(),profile:structuredClone(profile())};const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download=`${profile().name.replace(/[^\p{L}\p{N}_-]/gu,'_')}-profile-${today()}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('현재 프로필의 목록을 파일로 내보냈어요.');}
+const passwordDomain='@password.fridge.invalid';
+const isPasswordAccount=user=>user?.email?.endsWith(passwordDomain);
+const accountLabel=user=>isPasswordAccount(user)?user.user_metadata?.fridge_login_email||'이메일 계정':user.email;
+
+// Keep unverified email signups separate from Google identities.
+async function passwordAccountId(email){
+  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(email));
+  const hex=Array.from(new Uint8Array(bytes),byte=>byte.toString(16).padStart(2,'0')).join('');
+  return hex+passwordDomain;
+}
+
+function showEmailAuth(mode){
+  const signup=mode==='signup',change=mode==='change-password',newPassword=signup||change;
+  const title=signup?'이메일로 회원가입':change?'비밀번호 변경':'이메일로 로그인';
+  const help=signup?'가입하면 바로 로그인돼요. 비밀번호를 잊으면 이메일로 복구할 수 없으니, 안전한 곳에 보관해 주세요.':
+    change?'새 비밀번호는 12자 이상으로 정해 주세요.':'가입할 때 사용한 이메일과 비밀번호를 입력해 주세요.';
+  const firstField=change
+    ?field('현재 비밀번호','currentPassword','','password','required autocomplete="current-password"')
+    :field('이메일','email','','email','required maxlength="254" autocomplete="username" autocapitalize="none"');
+  const password=field(newPassword?'새 비밀번호 (12자 이상)':'비밀번호','password','','password',
+    newPassword?'required minlength="12" autocomplete="new-password"':'required autocomplete="current-password"');
+  const confirm=newPassword?field('비밀번호 확인','confirmPassword','','password','required autocomplete="new-password"'):'';
+  openModal(dialog(title,`<p class="notice">${help}</p><div class="account-fields">${firstField}${password}${confirm}</div><p class="notice error" role="alert" hidden></p>`,
+    `<button type="button" class="btn secondary" data-action="profiles">뒤로</button><button type="submit" class="btn primary">${signup?'가입하기':change?'변경하기':'로그인'}</button>`,'email-auth-form'),{mode});
+}
+
+async function submitEmailAuth(form,mode){
+  if(!accountClient||authBusy)return;
+  const signup=mode==='signup',change=mode==='change-password';
+  if(change?!isPasswordAccount(accountUser):accountUser)return;
+  const fd=new FormData(form);
+  const password=String(fd.get('password')||'');
+  const errorBox=form.querySelector('[role="alert"]');
+  const showError=message=>{errorBox.textContent=message;errorBox.hidden=false;};
+  errorBox.hidden=true;
+  if(signup||change){
+    if(password.length<12){showError('비밀번호를 12자 이상 입력해 주세요.');return;}
+    if(new TextEncoder().encode(password).length>72){showError('비밀번호가 너무 길어요. 길이를 줄여 주세요.');return;}
+    if(password!==fd.get('confirmPassword')){showError('비밀번호가 일치하지 않아요.');return;}
+  }
+  const button=form.querySelector('[type="submit"]');
+  authBusy=true;
+  button.disabled=true;
+  try{
+    if(change){
+      const {error}=await accountClient.auth.updateUser({password,current_password:fd.get('currentPassword')});
+      if(error)throw error;
+      if(form.isConnected)closeModal();
+      toast('비밀번호를 변경했어요.');
+      return;
+    }
+    const email=String(fd.get('email')||'').trim().toLowerCase();
+    const id=await passwordAccountId(email);
+    const result=signup
+      ?await accountClient.auth.signUp({email:id,password,options:{data:{fridge_login_email:email}}})
+      :await accountClient.auth.signInWithPassword({email:id,password});
+    if(result.error)throw result.error;
+    if(!result.data.session){showError('계정에 바로 연결하지 못했어요. 잠시 후 다시 시도해 주세요.');return;}
+    if(form.isConnected)closeModal();
+    toast(signup?'가입했어요. 다른 기기에서도 같은 계정으로 로그인할 수 있어요.':'로그인했어요.');
+  }catch(error){
+    const messages={
+      invalid_credentials:'이메일 또는 비밀번호를 확인해 주세요.',
+      user_already_exists:'이미 가입한 이메일이에요. 이메일로 로그인해 주세요.',
+      weak_password:'추측하기 어려운 비밀번호로 다시 입력해 주세요.',
+      same_password:'현재 비밀번호와 다른 비밀번호를 입력해 주세요.',
+      over_request_rate_limit:'요청이 많아요. 잠시 후 다시 시도해 주세요.'
+    };
+    const fallback=change?'현재 비밀번호와 네트워크 연결을 확인한 뒤 다시 시도해 주세요.':'계정 연결에 실패했어요. 잠시 후 다시 시도해 주세요.';
+    showError(messages[error?.code]||fallback);
+  }finally{
+    authBusy=false;
+    button.disabled=false;
+  }
+}
+
 function showProfiles(){
   const local=loadState(browserStorage,KEY);
-  const account=accountUser?`<p class="notice">${esc(accountUser.email)} 계정의 목록이에요. 같은 Google 계정으로 로그인한 기기에서 함께 사용해요.</p><button type="button" class="btn secondary" data-action="logout">로그아웃</button><h3>이 기기의 기존 기록 가져오기</h3>${local.state?.profiles.map(p=>`<button type="button" class="profile-row" data-action="import-local" data-id="${esc(p.id)}"><span>${esc(p.name)}</span><span>냉장고 ${p.fridge.length} · 장보기 ${p.shopping.length} · 구매 ${p.purchases.length}</span></button>`).join('')||'<p class="field-help">이 기기에 저장한 기존 프로필이 없어요.</p>'}<label class="field"><span class="field-label">내보낸 목록 파일 가져오기</span><input type="file" id="import-profile-file" accept="application/json,.json"></label>`:`<p class="notice">로그인 전 목록은 이 브라우저에 저장돼요. Google 계정으로 로그인하면 기기 간 동기화를 사용할 수 있어요.</p><button type="button" class="btn primary" data-action="google-login" ${accountClient?'':'disabled'}>Google로 로그인</button>${accountClient?'':'<p class="field-help">계정 연결을 준비 중이에요. 현재 목록은 그대로 사용할 수 있어요.</p>'}`;
+  const account=accountUser?`<p class="notice">${esc(accountLabel(accountUser))} 계정의 목록이에요. 다른 기기에서도 같은 계정으로 로그인하면 함께 사용할 수 있어요.</p><div class="account-actions"><button type="button" class="btn secondary" data-action="logout">로그아웃</button>${isPasswordAccount(accountUser)?'<button type="button" class="btn secondary" data-action="email-change-password">비밀번호 변경</button>':''}</div><h3>이 기기의 기존 기록 가져오기</h3>${local.state?.profiles.map(p=>`<button type="button" class="profile-row" data-action="import-local" data-id="${esc(p.id)}"><span>${esc(p.name)}</span><span>냉장고 ${p.fridge.length} · 장보기 ${p.shopping.length} · 구매 ${p.purchases.length}</span></button>`).join('')||'<p class="field-help">이 기기에 저장한 기존 프로필이 없어요.</p>'}<label class="field"><span class="field-label">내보낸 목록 파일 가져오기</span><input type="file" id="import-profile-file" accept="application/json,.json"></label>`:`<p class="notice">로그인 전 목록은 이 브라우저에 저장돼요. 로그인하면 다른 기기와 목록을 동기화할 수 있어요.</p><div class="account-actions"><button type="button" class="btn primary" data-action="email-login" ${accountClient?'':'disabled'}>이메일로 로그인</button><button type="button" class="btn secondary" data-action="email-signup" ${accountClient?'':'disabled'}>회원가입</button><button type="button" class="btn secondary" data-action="google-login" ${accountClient?'':'disabled'}>Google로 로그인</button></div>${accountClient?'':'<p class="field-help">계정 연결을 준비 중이에요. 현재 목록은 그대로 사용할 수 있어요.</p>'}`;
   openModal(dialog('나의 주방 프로필',`${account}<h3>${accountUser?'계정의 주방':'이 기기의 프로필'}</h3><div class="profile-list">${state.profiles.map(p=>`<button type="button" class="profile-row" data-action="switch-profile" data-id="${esc(p.id)}"><span>${icon('user')} ${esc(p.name)}</span><span>${p.id===state.activeProfileId?'사용 중':'선택'}</span></button>`).join('')}</div><h3>새 주방 만들기</h3>${field('주방 이름','profileName','','text','required maxlength="30" placeholder="예: 우리 집" autocomplete="off"')}`,`<button type="button" class="btn secondary" data-action="export-profile">현재 목록 내보내기</button><button type="button" class="btn secondary" data-action="close">닫기</button><button class="btn primary" type="submit">주방 만들기</button>`,'profile-form'),{});
 }
 
@@ -109,7 +186,7 @@ function renderAccountStatus(){
   let banner=$('#account-status');
   if(!banner){banner=document.createElement('div');banner.id='account-status';banner.className='account-status';$('#main-content').prepend(banner);}
   const labels={loading:'계정 기록을 불러오는 중',synced:'동기화 완료',saving:'동기화 중',offline:'연결 확인 필요',conflict:'다른 기기의 변경 확인 필요'};
-  const text=accountUser?`${accountUser.email} · ${pendingRemote?'새 변경 확인 대기':labels[accountPhase]||'연결 확인 필요'}`:'이 기기에 저장 중';
+  const text=accountUser?`${accountLabel(accountUser)} · ${pendingRemote?'새 변경 확인 대기':labels[accountPhase]||'연결 확인 필요'}`:'이 기기에 저장 중';
   banner.innerHTML=`<span role="status">${esc(text)}</span>${accountUser?'<button type="button" class="btn ghost small" data-action="refresh-account">최신 기록 확인</button>':''}`;
   const notice=$('.storage-notice');if(notice)notice.textContent=accountUser?'같은 계정의 기기와 동기화해요.':'로그인하면 다른 기기와 동기화할 수 있어요.';
 }
@@ -123,7 +200,7 @@ function downloadJson(value,filename){
   const link=document.createElement('a');link.href=url;link.download=filename;link.click();window.setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 function exportDrafts(){
-  const form=$('#modal form');
+  const form=$('#modal form:not(#email-auth-form)');
   downloadJson({format:'fridge-grocery-unsaved-draft',version:1,exportedAt:new Date().toISOString(),state:structuredClone(state),prices:Object.fromEntries(dirtyPrices),form:form?{id:form.id,fields:[...new FormData(form).entries()].filter(([,v])=>typeof v==='string')}:null},`냉장고-입력보관-${today()}.json`);
 }
 function applyAccountSnapshot(snapshot){
@@ -185,6 +262,9 @@ function navigate(next){view=next;location.hash=next;render();window.scrollTo({t
 document.addEventListener('click',async event=>{const target=event.target.closest('[data-action]');if(!target||target.disabled||writeBusy)return;const {action,id,kind}=target.dataset;
 if(action==='navigate')navigate(target.dataset.view);
 if(action==='profiles')showProfiles();
+if(action==='email-login'&&!authBusy)showEmailAuth('login');
+if(action==='email-signup'&&!authBusy)showEmailAuth('signup');
+if(action==='email-change-password'&&!authBusy)showEmailAuth('change-password');
 if(action==='export-profile')exportCurrentProfile();
 if(action==='close')closeModal();
 if(action==='filter'){filters[view][target.dataset.filter]=target.dataset.value;render();if(view==='shopping')[...document.querySelectorAll('[data-action="filter"]')].find(button=>button.dataset.filter===target.dataset.filter&&button.dataset.value===target.dataset.value)?.focus({preventScroll:true});}
@@ -206,7 +286,7 @@ if(action==='switch-profile'){
   if(accountUser){state={...state,activeProfileId:id};try{browserStorage?.setItem(`fridge-grocery:active:${accountUser.id}`,id);}catch{}selected.clear();resetShoppingFilters();closeModal();render();}
   else if(await commit({...state,activeProfileId:id},'프로필을 바꿨어요.')){selected.clear();resetShoppingFilters();closeModal();render();}
 }
-if(action==='google-login'){try{const result=await accountClient.auth.signInWithOAuth({provider:'google',options:{redirectTo:new URL('./',location.href).href,queryParams:{prompt:'select_account'}}});if(result.error)throw result.error;}catch{toast('Google 로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.',true);}}
+if(action==='google-login'&&!authBusy){try{const result=await accountClient.auth.signInWithOAuth({provider:'google',options:{redirectTo:new URL('./',location.href).href,queryParams:{prompt:'select_account'}}});if(result.error)throw result.error;}catch{toast('Google 로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.',true);}}
 if(action==='logout'){const result=await accountClient.auth.signOut({scope:'local'});if(result.error)toast('로그아웃하지 못했어요. 연결을 확인해 주세요.',true);}
 if(action==='import-local'){try{const local=loadState(browserStorage,KEY);const incoming=local.state?.profiles.find(p=>p.id===id);if(!incoming)throw new Error('기존 기록을 읽지 못했어요.');await bringProfile(incoming);}catch(error){toast(error.message,true);}}
 if(action==='refresh-account'){if(editing())showSyncRecovery('입력 중인 내용이 있어요. 입력을 보관한 뒤 최신 기록을 불러올 수 있어요.');else await refreshAccount();}
@@ -224,7 +304,9 @@ if(el.name==='name'&&el.closest('#item-form')){const standard=findIngredient(el.
 });
 document.addEventListener('input',async event=>{if(event.isComposing)return;const el=event.target;if(el.name==='name'&&el.closest('#item-form')){const standard=findIngredient(el.value);if(standard)el.form.elements.category.value=standard.category;}if(el.dataset.priceId){dirtyPrices.set(el.dataset.priceId,el.value);}if(el.id==='view-search'){const start=el.selectionStart,end=el.selectionEnd;filters[view].search=el.value;render();const input=$('#view-search');input.focus({preventScroll:true});if(start!==null)input.setSelectionRange(start,end);}
 if(el.closest('#checkout-form,#purchase-form'))updateLiveSummary();});
-document.addEventListener('submit',async event=>{const form=event.target;if(!['item-form','profile-form','recipe-list-form','checkout-form','purchase-form'].includes(form.id))return;event.preventDefault();const fd=new FormData(form);
+document.addEventListener('submit',async event=>{const form=event.target;
+if(form.id==='email-auth-form'){event.preventDefault();if(modalContext?.mode)await submitEmailAuth(form,modalContext.mode);return;}
+if(!['item-form','profile-form','recipe-list-form','checkout-form','purchase-form'].includes(form.id))return;event.preventDefault();const fd=new FormData(form);
 try{
  if(form.id==='item-form'){const {kind,id}=modalContext;const name=String(fd.get('name')||'').trim();if(!name)throw new Error('재료 이름을 입력해 주세요.');const previous=profile()[kind].find(i=>i.id===id);const item=makeItem({...previous,ingredientId:findIngredient(name)?.id||null,name,category:fd.get('category'),quantity:fd.get('quantity'),unit:String(fd.get('unit')||'').trim(),location:fd.get('location'),expiry:fd.get('expiry'),price:kind==='shopping'?parseMoney(fd.get('price')):previous?.price??null});let next=structuredClone(profile());if(id)next[kind]=next[kind].map(i=>i.id===id?item:i);else if(kind==='shopping')next=addShopping(next,[item]).profile;else next.fridge.push(item);if(await commitProfile(next,id?'수정 내용을 저장했어요.':'목록에 추가했어요.'))closeModal();}
  if(form.id==='profile-form'){const name=String(fd.get('profileName')||'').trim();if(!name)throw new Error('사용할 아이디를 입력해 주세요.');if(state.profiles.some(p=>normalizeName(p.name)===normalizeName(name)))throw new Error('같은 아이디가 있어요. 위 목록에서 선택해 주세요.');const p=freshProfile(uid(),name);if(await commit({...state,activeProfileId:p.id,profiles:[...state.profiles,p]},'새 프로필을 만들었어요.')){selected.clear();resetShoppingFilters();closeModal();render();}}
@@ -235,6 +317,7 @@ try{
 });
 window.addEventListener('hashchange',()=>{const next=location.hash.slice(1);if(['recipes','fridge','shopping','history'].includes(next)&&view!==next){view=next;render();}});
 $('#modal').addEventListener('click',event=>{if(event.target===$('#modal')){const box=event.target.getBoundingClientRect();if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom)closeModal();}});
+$('#modal').addEventListener('cancel',event=>{event.preventDefault();closeModal();});
 window.addEventListener('storage',event=>{if(event.key===KEY&&!accountUser){readBlocked=true;storageProblem='다른 탭에서 목록이 변경되었어요. 새로고침한 뒤 계속 사용해 주세요.';render();}});
 render();
 

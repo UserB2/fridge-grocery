@@ -38,6 +38,37 @@ test('local users retain their records and see Google login availability in the 
   }finally{await p.close();}
 });
 
+test('email signup uses a separate identity and switches to the synced account',async()=>{
+  const p=await page();try{
+    const b=backend();
+    const user={id:'alice',email:'placeholder@password.fridge.invalid',user_metadata:{fridge_login_email:'alice@example.com'}};
+    let onSession,credentials;
+    Object.assign(b.client.auth,{
+      async getSession(){return {data:{session:null}};},
+      onAuthStateChange(fn){onSession=fn;return {data:{subscription:{unsubscribe(){}}}};},
+      async signUp(params){credentials=params;onSession('SIGNED_IN',{user});return {data:{session:{user}},error:null};}
+    });
+    p.cleanups.push(await p.app.initializeAccounts(async()=>b.client));
+    p.document.querySelector('[data-action="profiles"]').click();
+    p.document.querySelector('[data-action="email-signup"]').click();
+    const form=p.document.querySelector('#email-auth-form');
+    form.elements.email.value='Alice@Example.com';
+    form.elements.password.value='a-test-password';
+    form.elements.confirmPassword.value='mismatched-password';
+    const submit=()=>form.dispatchEvent(new p.window.Event('submit',{bubbles:true,cancelable:true}));
+    submit();await tick();
+    assert.equal(credentials,undefined);
+    assert.match(form.querySelector('[role="alert"]').textContent,/일치/);
+    form.elements.confirmPassword.value=form.elements.password.value;
+    submit();
+    await waitFor(()=>p.document.querySelector('#profile-button').textContent.includes('계정 주방'));
+    assert.match(credentials.email,/^[a-f0-9]{64}@password\.fridge\.invalid$/);
+    assert.equal(credentials.options.data.fridge_login_email,'alice@example.com');
+    assert.equal(p.document.querySelector('#modal').open,false);
+    assert.match(p.document.querySelector('#account-status').textContent,/alice@example.com/);
+  }finally{await p.close();}
+});
+
 test('account login switches state while logout restores the untouched local profile',async()=>{
   const p=await page();try{
     assert.equal(typeof p.app.initializeAccounts,'function');

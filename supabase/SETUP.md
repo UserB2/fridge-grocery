@@ -1,6 +1,6 @@
-# 무료 Google 로그인과 동기화 연결
+# 무료 계정 로그인과 동기화 연결
 
-운영 조건은 **GitHub Pages + Supabase Free + Google 로그인**이다. 결제 수단 등록, Pro 업그레이드, 유료 애드온, 이메일 발송 서비스, 도메인 구매는 필요하지 않다. 무료 한도에 도달하면 제한을 안내하며 유료로 전환하지 않는다. Supabase Free 프로젝트는 비활성 상태가 오래 지속되면 휴면될 수 있다.
+운영 조건은 **GitHub Pages + Supabase Free**이다. 결제 수단 등록, Pro 업그레이드, 유료 애드온, 이메일 발송 서비스, 도메인 구매는 필요하지 않다. 무료 한도에 도달하면 제한을 안내하며 유료로 전환하지 않는다. Supabase Free 프로젝트는 비활성 상태가 오래 지속되면 휴면될 수 있다.
 
 ## 1. Supabase Free 프로젝트
 
@@ -16,7 +16,15 @@ Google Cloud에서 이 앱 전용 프로젝트와 Google Auth Platform 설정을
 
 Audience가 Testing이면 사용할 Google 계정을 테스트 사용자에 추가해야 한다. 일반 사용자에게 공개하려면 Google의 게시·브랜딩 요구를 충족한 후 Production으로 전환한다. 개인정보 안내와 서비스 정보도 실제로 제공해야 한다. Google 기본 로그인만을 위해 결제 정보를 등록할 필요는 없다.
 
-## 3. 앱 주소와 공개 설정
+## 3. 이메일과 비밀번호 가입
+
+1. SQL Editor에서 `email-signup-hook.sql`을 실행한다.
+2. Authentication → Auth Hooks → **Before User Created**를 Postgres 방식으로 설정하고 `public.check_fridge_signup` 함수를 활성화한다.
+3. 후크가 적용된 뒤 Sign In / Providers에서 Email을 활성화한 상태로 **Confirm email**을 끈다.
+
+메일 소유 확인을 생략하는 가입은 입력한 주소를 앱 전용 식별자로 바꿔 Supabase에 전달한다. 가입 후크는 이 형식 밖의 이메일 가입을 막아 Google 로그인과 주소가 합쳐지는 것을 막는다. 가입 메일과 비밀번호 찾기 메일을 발송할 설정은 필요하지 않다.
+
+## 4. 앱 주소와 공개 설정
 
 Supabase Authentication → URL Configuration의 Site URL과 허용 Redirect URL에 다음 주소를 등록한다.
 
@@ -26,12 +34,12 @@ Supabase Authentication → URL Configuration의 Site URL과 허용 Redirect URL
 
 `cloud-config.js`에는 Supabase 프로젝트 URL과 publishable key(또는 legacy anon key)만 넣는다. 비밀번호, service-role key, Google Client Secret은 넣지 않는다. 설정이 비어 있으면 앱은 로컬 모드로 동작한다.
 
-## 4. 실제 연결 확인
+## 5. 실제 연결 확인
 
-1. Google로 로그인한 뒤 계정이 비어 있으면 기존 프로필을 직접 선택해 가져온다. 기존 브라우저 저장값은 보존한다.
-2. 다른 브라우저에서 같은 Google 계정으로 로그인하고 같은 기록이 보이는지 확인한다.
+1. Google과 이메일 로그인을 확인한다. 이메일 가입은 즉시 로그인되어야 한다. 계정이 비어 있으면 기존 프로필을 직접 선택해 가져온다.
+2. 다른 브라우저에서 같은 계정으로 로그인하고 같은 기록이 보이는지 확인한다.
 3. 재료·장보기·구매 내역을 바꿔 다른 기기에 반영되는지 확인한다.
-4. 다른 Google 계정에서는 첫 계정의 기록이 보이지 않는지 확인한다.
+4. 다른 계정에서는 첫 계정의 기록이 보이지 않는지 확인한다.
 5. 두 기기에서 같은 기록을 동시에 수정해 뒤늦은 저장이 거절되는지 확인한다. 입력 보관 파일을 받은 뒤 최신 기록을 불러올 수 있다.
 6. 로그아웃하면 계정 기록을 숨기고 해당 기기의 로컬 프로필로 돌아오는지 확인한다.
 
