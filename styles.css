@@ -452,6 +452,8 @@ p.item-meta { margin-bottom: 0; }
 
 /* Shopping filters share the existing category chips and search field. */
 .account-status { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; color:var(--muted); font-size:12px; margin-bottom:20px; overflow-wrap:anywhere; }
+.account-actions { display:flex; flex-wrap:wrap; gap:9px; }
+.account-fields { display:grid; gap:14px; }
 .sync-recovery p { margin-top:0; }
 .sync-recovery .btn { white-space:normal; text-align:left; }
 .dialog-body > .btn + h3 { margin-top:24px; }
