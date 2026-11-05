@@ -454,6 +454,8 @@ p.item-meta { margin-bottom: 0; }
 .account-status { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; color:var(--muted); font-size:12px; margin-bottom:20px; overflow-wrap:anywhere; }
 .account-actions { display:flex; flex-wrap:wrap; gap:9px; }
 .account-fields { display:grid; gap:14px; }
+.account-fields .field input { background:#fff; border-color:#748575; color:var(--ink); }
+.account-fields .field input::placeholder { color:#596a5b; opacity:1; }
 .sync-recovery p { margin-top:0; }
 .sync-recovery .btn { white-space:normal; text-align:left; }
 .dialog-body > .btn + h3 { margin-top:24px; }
