@@ -117,12 +117,12 @@ function showEmailAuth(mode){
   const help=signup?'가입하면 바로 로그인돼요. 비밀번호를 잊으면 이메일로 복구할 수 없으니, 안전한 곳에 보관해 주세요.':
     change?'새 비밀번호는 12자 이상으로 정해 주세요.':'가입할 때 사용한 아이디 또는 이메일과 비밀번호를 입력해 주세요.';
   const firstField=change
-    ?field('현재 비밀번호','currentPassword','','password','required autocomplete="current-password"')
-    :field('아이디 또는 이메일','login','','text','required maxlength="254" autocomplete="username" autocapitalize="none" spellcheck="false"');
+    ?field('현재 비밀번호','currentPassword','','password','required autocomplete="current-password" placeholder="현재 비밀번호 입력"')
+    :field('아이디 또는 이메일','login','','text','required maxlength="254" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="아이디 또는 이메일 입력"');
   const loginHelp=signup?'<p class="field-help">아이디는 영문이나 숫자로 시작하고, 영문·숫자·밑줄·하이픈을 사용해 3~30자로 정해 주세요.</p>':'';
   const password=field(newPassword?'새 비밀번호 (12자 이상)':'비밀번호','password','','password',
-    newPassword?'required minlength="12" autocomplete="new-password"':'required autocomplete="current-password"');
-  const confirm=newPassword?field('비밀번호 확인','confirmPassword','','password','required autocomplete="new-password"'):'';
+    newPassword?'required minlength="12" autocomplete="new-password" placeholder="12자 이상 입력"':'required autocomplete="current-password" placeholder="비밀번호 입력"');
+  const confirm=newPassword?field('비밀번호 확인','confirmPassword','','password','required autocomplete="new-password" placeholder="비밀번호 다시 입력"'):'';
   openModal(dialog(title,`<p class="notice">${help}</p><div class="account-fields"><div>${firstField}${loginHelp}</div>${password}${confirm}</div><p class="notice error" role="alert" hidden></p>`,
     `<button type="button" class="btn secondary" data-action="profiles">뒤로</button><button type="submit" class="btn primary">${signup?'가입하기':change?'변경하기':'로그인'}</button>`,'email-auth-form'),{mode});
 }
