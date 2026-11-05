@@ -52,7 +52,7 @@ test('email signup uses a separate identity and switches to the synced account',
     p.document.querySelector('[data-action="profiles"]').click();
     p.document.querySelector('[data-action="email-signup"]').click();
     const form=p.document.querySelector('#email-auth-form');
-    form.elements.email.value='Alice@Example.com';
+    form.elements.login.value='Alice@Example.com';
     form.elements.password.value='a-test-password';
     form.elements.confirmPassword.value='mismatched-password';
     const submit=()=>form.dispatchEvent(new p.window.Event('submit',{bubbles:true,cancelable:true}));
@@ -66,6 +66,28 @@ test('email signup uses a separate identity and switches to the synced account',
     assert.equal(credentials.options.data.fridge_login_email,'alice@example.com');
     assert.equal(p.document.querySelector('#modal').open,false);
     assert.match(p.document.querySelector('#account-status').textContent,/alice@example.com/);
+  }finally{await p.close();}
+});
+
+test('a username signs in using its case-insensitive identifier',async()=>{
+  const p=await page();try{
+    const b=backend();
+    let credentials;
+    Object.assign(b.client.auth,{
+      async getSession(){return {data:{session:null}};},
+      async signInWithPassword(params){credentials=params;return {data:{session:null},error:{code:'invalid_credentials'}};}
+    });
+    p.cleanups.push(await p.app.initializeAccounts(async()=>b.client));
+    p.document.querySelector('[data-action="profiles"]').click();
+    p.document.querySelector('[data-action="email-login"]').click();
+    const form=p.document.querySelector('#email-auth-form');
+    form.elements.login.value='Union';
+    form.elements.password.value='a-test-password';
+    form.dispatchEvent(new p.window.Event('submit',{bubbles:true,cancelable:true}));
+    await waitFor(()=>credentials);
+    const expected=Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('union'))).toString('hex');
+    assert.equal(credentials.email,expected+'@password.fridge.invalid');
+    assert.match(form.querySelector('[role="alert"]').textContent,/아이디 또는 이메일/);
   }finally{await p.close();}
 });
 
