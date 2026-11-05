@@ -135,7 +135,12 @@ export function loadState(storage, key) {
       require(typeof value.name === 'string' || ingredients.some(ingredient => ingredient.id === value.ingredientId));
       require(value.recipeIds === undefined || (Array.isArray(value.recipeIds) && value.recipeIds.every(id => typeof id === 'string')));
       require(value.transferred === undefined || typeof value.transferred === 'boolean');
-      return { ...value, ...makeItem(value) };
+      const item = { ...value, ...makeItem(value) };
+      // A saved item can use a specific label with a broader catalog match.
+      if (value.ingredientId && value.ingredientId === item.ingredientId && typeof value.name === 'string' && value.name.trim()) {
+        item.name = value.name.trim();
+      }
+      return item;
     };
     const profiles = state.profiles.map(profile => {
       require(record(profile) && typeof profile.id === 'string' && typeof profile.name === 'string');

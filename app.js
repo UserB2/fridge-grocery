@@ -102,27 +102,28 @@ function updateLiveSummary(){const form=$('#checkout-form')||$('#purchase-form')
 function exportCurrentProfile(){const payload={format:'fridge-grocery-profile',version:1,exportedAt:new Date().toISOString(),profile:structuredClone(profile())};const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download=`${profile().name.replace(/[^\p{L}\p{N}_-]/gu,'_')}-profile-${today()}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('현재 프로필의 목록을 파일로 내보냈어요.');}
 const passwordDomain='@password.fridge.invalid';
 const isPasswordAccount=user=>user?.email?.endsWith(passwordDomain);
-const accountLabel=user=>isPasswordAccount(user)?user.user_metadata?.fridge_login_email||'이메일 계정':user.email;
+const accountLabel=user=>isPasswordAccount(user)?user.user_metadata?.fridge_login_name||user.user_metadata?.fridge_login_email||'비밀번호 계정':user.email;
 
-// Keep unverified email signups separate from Google identities.
-async function passwordAccountId(email){
-  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(email));
+// Keep password accounts separate from Google identities.
+async function passwordAccountId(login){
+  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(login));
   const hex=Array.from(new Uint8Array(bytes),byte=>byte.toString(16).padStart(2,'0')).join('');
   return hex+passwordDomain;
 }
 
 function showEmailAuth(mode){
   const signup=mode==='signup',change=mode==='change-password',newPassword=signup||change;
-  const title=signup?'이메일로 회원가입':change?'비밀번호 변경':'이메일로 로그인';
+  const title=signup?'회원가입':change?'비밀번호 변경':'아이디·이메일 로그인';
   const help=signup?'가입하면 바로 로그인돼요. 비밀번호를 잊으면 이메일로 복구할 수 없으니, 안전한 곳에 보관해 주세요.':
-    change?'새 비밀번호는 12자 이상으로 정해 주세요.':'가입할 때 사용한 이메일과 비밀번호를 입력해 주세요.';
+    change?'새 비밀번호는 12자 이상으로 정해 주세요.':'가입할 때 사용한 아이디 또는 이메일과 비밀번호를 입력해 주세요.';
   const firstField=change
     ?field('현재 비밀번호','currentPassword','','password','required autocomplete="current-password"')
-    :field('이메일','email','','email','required maxlength="254" autocomplete="username" autocapitalize="none"');
+    :field('아이디 또는 이메일','login','','text','required maxlength="254" autocomplete="username" autocapitalize="none" spellcheck="false"');
+  const loginHelp=signup?'<p class="field-help">아이디는 영문이나 숫자로 시작하고, 영문·숫자·밑줄·하이픈을 사용해 3~30자로 정해 주세요.</p>':'';
   const password=field(newPassword?'새 비밀번호 (12자 이상)':'비밀번호','password','','password',
     newPassword?'required minlength="12" autocomplete="new-password"':'required autocomplete="current-password"');
   const confirm=newPassword?field('비밀번호 확인','confirmPassword','','password','required autocomplete="new-password"'):'';
-  openModal(dialog(title,`<p class="notice">${help}</p><div class="account-fields">${firstField}${password}${confirm}</div><p class="notice error" role="alert" hidden></p>`,
+  openModal(dialog(title,`<p class="notice">${help}</p><div class="account-fields"><div>${firstField}${loginHelp}</div>${password}${confirm}</div><p class="notice error" role="alert" hidden></p>`,
     `<button type="button" class="btn secondary" data-action="profiles">뒤로</button><button type="submit" class="btn primary">${signup?'가입하기':change?'변경하기':'로그인'}</button>`,'email-auth-form'),{mode});
 }
 
@@ -140,6 +141,11 @@ async function submitEmailAuth(form,mode){
     if(new TextEncoder().encode(password).length>72){showError('비밀번호가 너무 길어요. 길이를 줄여 주세요.');return;}
     if(password!==fd.get('confirmPassword')){showError('비밀번호가 일치하지 않아요.');return;}
   }
+  const login=String(fd.get('login')||'').trim();
+  const normalizedLogin=normalizeName(login);
+  const emailLogin=normalizedLogin.includes('@');
+  const validLogin=emailLogin?/^[^\s@]+@[^\s@]+$/.test(normalizedLogin):/^[a-z0-9][a-z0-9_-]{2,29}$/.test(normalizedLogin);
+  if(!change&&(!validLogin||normalizedLogin.length>254)){showError('아이디 또는 이메일 형식을 확인해 주세요.');return;}
   const button=form.querySelector('[type="submit"]');
   authBusy=true;
   button.disabled=true;
@@ -151,10 +157,10 @@ async function submitEmailAuth(form,mode){
       toast('비밀번호를 변경했어요.');
       return;
     }
-    const email=String(fd.get('email')||'').trim().toLowerCase();
-    const id=await passwordAccountId(email);
+    const id=await passwordAccountId(normalizedLogin);
+    const data=emailLogin?{fridge_login_email:normalizedLogin}:{fridge_login_name:login};
     const result=signup
-      ?await accountClient.auth.signUp({email:id,password,options:{data:{fridge_login_email:email}}})
+      ?await accountClient.auth.signUp({email:id,password,options:{data}})
       :await accountClient.auth.signInWithPassword({email:id,password});
     if(result.error)throw result.error;
     if(!result.data.session){showError('계정에 바로 연결하지 못했어요. 잠시 후 다시 시도해 주세요.');return;}
@@ -162,8 +168,8 @@ async function submitEmailAuth(form,mode){
     toast(signup?'가입했어요. 다른 기기에서도 같은 계정으로 로그인할 수 있어요.':'로그인했어요.');
   }catch(error){
     const messages={
-      invalid_credentials:'이메일 또는 비밀번호를 확인해 주세요.',
-      user_already_exists:'이미 가입한 이메일이에요. 이메일로 로그인해 주세요.',
+      invalid_credentials:'아이디 또는 이메일과 비밀번호를 확인해 주세요.',
+      user_already_exists:'이미 가입한 아이디 또는 이메일이에요. 로그인해 주세요.',
       weak_password:'추측하기 어려운 비밀번호로 다시 입력해 주세요.',
       same_password:'현재 비밀번호와 다른 비밀번호를 입력해 주세요.',
       over_request_rate_limit:'요청이 많아요. 잠시 후 다시 시도해 주세요.'
@@ -178,7 +184,7 @@ async function submitEmailAuth(form,mode){
 
 function showProfiles(){
   const local=loadState(browserStorage,KEY);
-  const account=accountUser?`<p class="notice">${esc(accountLabel(accountUser))} 계정의 목록이에요. 다른 기기에서도 같은 계정으로 로그인하면 함께 사용할 수 있어요.</p><div class="account-actions"><button type="button" class="btn secondary" data-action="logout">로그아웃</button>${isPasswordAccount(accountUser)?'<button type="button" class="btn secondary" data-action="email-change-password">비밀번호 변경</button>':''}</div><h3>이 기기의 기존 기록 가져오기</h3>${local.state?.profiles.map(p=>`<button type="button" class="profile-row" data-action="import-local" data-id="${esc(p.id)}"><span>${esc(p.name)}</span><span>냉장고 ${p.fridge.length} · 장보기 ${p.shopping.length} · 구매 ${p.purchases.length}</span></button>`).join('')||'<p class="field-help">이 기기에 저장한 기존 프로필이 없어요.</p>'}<label class="field"><span class="field-label">내보낸 목록 파일 가져오기</span><input type="file" id="import-profile-file" accept="application/json,.json"></label>`:`<p class="notice">로그인 전 목록은 이 브라우저에 저장돼요. 로그인하면 다른 기기와 목록을 동기화할 수 있어요.</p><div class="account-actions"><button type="button" class="btn primary" data-action="email-login" ${accountClient?'':'disabled'}>이메일로 로그인</button><button type="button" class="btn secondary" data-action="email-signup" ${accountClient?'':'disabled'}>회원가입</button><button type="button" class="btn secondary" data-action="google-login" ${accountClient?'':'disabled'}>Google로 로그인</button></div>${accountClient?'':'<p class="field-help">계정 연결을 준비 중이에요. 현재 목록은 그대로 사용할 수 있어요.</p>'}`;
+  const account=accountUser?`<p class="notice">${esc(accountLabel(accountUser))} 계정의 목록이에요. 다른 기기에서도 같은 계정으로 로그인하면 함께 사용할 수 있어요.</p><div class="account-actions"><button type="button" class="btn secondary" data-action="logout">로그아웃</button>${isPasswordAccount(accountUser)?'<button type="button" class="btn secondary" data-action="email-change-password">비밀번호 변경</button>':''}</div><h3>이 기기의 기존 기록 가져오기</h3>${local.state?.profiles.map(p=>`<button type="button" class="profile-row" data-action="import-local" data-id="${esc(p.id)}"><span>${esc(p.name)}</span><span>냉장고 ${p.fridge.length} · 장보기 ${p.shopping.length} · 구매 ${p.purchases.length}</span></button>`).join('')||'<p class="field-help">이 기기에 저장한 기존 프로필이 없어요.</p>'}<label class="field"><span class="field-label">내보낸 목록 파일 가져오기</span><input type="file" id="import-profile-file" accept="application/json,.json"></label>`:`<p class="notice">로그인 전 목록은 이 브라우저에 저장돼요. 로그인하면 다른 기기와 목록을 동기화할 수 있어요.</p><div class="account-actions"><button type="button" class="btn primary" data-action="email-login" ${accountClient?'':'disabled'}>아이디·이메일 로그인</button><button type="button" class="btn secondary" data-action="email-signup" ${accountClient?'':'disabled'}>회원가입</button><button type="button" class="btn secondary" data-action="google-login" ${accountClient?'':'disabled'}>Google로 로그인</button></div>${accountClient?'':'<p class="field-help">계정 연결을 준비 중이에요. 현재 목록은 그대로 사용할 수 있어요.</p>'}`;
   openModal(dialog('나의 주방 프로필',`${account}<h3>${accountUser?'계정의 주방':'이 기기의 프로필'}</h3><div class="profile-list">${state.profiles.map(p=>`<button type="button" class="profile-row" data-action="switch-profile" data-id="${esc(p.id)}"><span>${icon('user')} ${esc(p.name)}</span><span>${p.id===state.activeProfileId?'사용 중':'선택'}</span></button>`).join('')}</div><h3>새 주방 만들기</h3>${field('주방 이름','profileName','','text','required maxlength="30" placeholder="예: 우리 집" autocomplete="off"')}`,`<button type="button" class="btn secondary" data-action="export-profile">현재 목록 내보내기</button><button type="button" class="btn secondary" data-action="close">닫기</button><button class="btn primary" type="submit">주방 만들기</button>`,'profile-form'),{});
 }
 
